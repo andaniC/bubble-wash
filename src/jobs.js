@@ -656,6 +656,75 @@ function cow() {
   return s;
 }
 
+// ---------- muddy pig ----------
+
+function pig() {
+  const s = new Scene();
+  const p = s.on(0);
+  sky(p, 0, 150, '#6aa0dc', '#d6eaf6');
+  clouds(p, 3, 70, 241);
+  p.rect(10, 92, 56, 58, vshade('#a33a2a', 92, 150));
+  p.poly([[6, 94], [38, 68], [70, 94]], C('#7a2a20'));
+  p.rect(28, 118, 16, 32, C('#f0e6d6'));
+  treeLine(p, 150, '#6c9a54', 242, 14);
+  // A muddy pen: wet brown ground with darker puddles and bits of straw.
+  p.rect(0, 150, 320, 90, (x, y) => {
+    const n = fbm(x / 14, y / 7, 3, 243);
+    if (n > 0.62) return shade(C('#4a3420'), 0.9 + hash(x, y, 1) * 0.1);
+    if (hash(x, y, 244) > 0.985) return C('#d9b45a');
+    return shade(C('#7a5533'), 0.85 + n * 0.3);
+  });
+  for (let x = 0; x < 320; x += 26) p.rect(x, 128, 4, 34, C('#8a6a48'));
+  p.rect(0, 134, 320, 3, C('#8a6a48'));
+  p.rect(0, 148, 320, 3, C('#8a6a48'));
+  groundShadow(p, 166, 210, 108, 8, 0.65);
+
+  const legs = s.part('Legs');
+  const body = s.part('Body');
+  const tail = s.part('Tail');
+  const head = s.part('Head');
+  const ears = s.part('Ears');
+  const snout = s.part('Snout');
+  const PINK = '#f2a5b4';
+  s.on(legs);
+  for (const x of [94, 118, 198, 222]) {
+    p.roundRect(x, 160, 18, 48, 5, ballShade(C(PINK), x + 9, 176, 11, 30, 0.35));
+    p.rect(x, 202, 18, 7, C('#4a3a36'));
+    p.rect(x + 8, 203, 1, 6, C('#2a201e'));
+  }
+  s.on(body);
+  p.ellipse(162, 136, 94, 52, ballShade(C(PINK), 150, 128, 100, 60, 0.4));
+  s.on(tail);
+  for (let k = 0; k < 40; k++) {
+    const a = k * 0.32;
+    const r = 2 + k * 0.17;
+    p.circle(64 - Math.cos(a) * r, 112 - Math.sin(a) * r, 1.4, C('#e88fa0'));
+  }
+  s.on(head);
+  p.ellipse(254, 122, 38, 33, ballShade(C(PINK), 248, 114, 38, 33, 0.4));
+  p.rect(263, 107, 4, 4, C('#2a1d18'));
+  p.rect(264, 107, 1, 1, C('#ffffff'));
+  p.line(266, 146, 276, 146, C('#a65a6a'));
+  p.line(264, 144, 266, 146, C('#a65a6a'));
+  s.on(ears);
+  p.poly([[234, 98], [252, 80], [266, 100], [252, 104]], ballShade(C('#e88fa0'), 250, 92, 16, 12, 0.3));
+  p.poly([[226, 104], [236, 84], [246, 102]], ballShade(C('#df8496'), 236, 96, 10, 12, 0.3));
+  s.on(snout);
+  p.ellipse(287, 130, 11, 15, ballShade(C('#e8899c'), 284, 126, 11, 15, 0.35));
+  p.ellipse(289, 124, 2, 3, C('#7a3a48'));
+  p.ellipse(289, 136, 2, 3, C('#7a3a48'));
+
+  const all = [legs, body, tail, head, ears, snout];
+  // Pigs love mud: thick on the legs and belly, splattered up the sides.
+  s.coat('mud', (x, y) => (fbm(x / 10, y / 10, 3, 245) + lower(100, 208, 1)(x, y)) * 1.9 - 1.05, all);
+  for (let k = 0; k < 30; k++) s.splat('mud', 80 + hash(k, 1, 246) * 210, 90 + hash(k, 2, 246) * 70, 2 + hash(k, 3, 246) * 4);
+  s.splat('mud', 280, 140, 5);
+  s.splat('mud', 250, 104, 4);
+  s.coat('dung', (x, y) => (x < 130 && y > 120 ? fbm(x / 6, y / 6, 2, 247) * 1.6 - 0.45 : 0), [body, legs, tail]);
+  s.blotch('dust', [body, head, ears], { scale: 9, cover: 0.35, extra: (x, y) => (y < 110 ? 0.2 : -0.2) });
+  return s;
+}
+
 // ---------- pickup truck ----------
 
 function pickup() {
@@ -1248,6 +1317,7 @@ function rocket() {
 export const JOBS = [
   { id: 'football', name: 'Muddy Football', pay: 40, build: football },
   { id: 'doormat', name: 'Welcome Mat', pay: 50, build: doormat },
+  { id: 'pig', name: 'Muddy Pig', pay: 55, build: pig },
   { id: 'plates', name: 'Dinner Plates', pay: 60, build: plates },
   { id: 'gnome', name: 'Garden Gnome', pay: 70, build: gnome },
   { id: 'car', name: 'Family Car', pay: 150, build: familyCar },
