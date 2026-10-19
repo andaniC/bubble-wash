@@ -417,12 +417,17 @@ if (debug) {
         if (p.clean) continue;
         const pos = p.positions;
         const nor = p.mesh.geometry.attributes.normal.array;
-        for (let i = 0; i < p.dirt.length; i += 23) {
+        for (let i = 0; i < p.dirt.length; i += 41) {
           if (p.dirt[i] < 0.3) continue;
           v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
           p.mesh.localToWorld(v);
           n.set(nor[i * 3], nor[i * 3 + 1], nor[i * 3 + 2]).transformDirection(p.mesh.matrixWorld);
           if (n.dot(toCam.copy(camera.position).sub(v).normalize()) < 0.3) continue;
+          // Skip spots hidden behind another part of the object.
+          const dist = camera.position.distanceTo(v);
+          raycaster.set(camera.position, toCam.copy(v).sub(camera.position).normalize());
+          const first = raycaster.intersectObject(obj.hitMesh, false)[0];
+          if (first && first.distance < dist - obj.size * 0.05) continue;
           v.project(camera);
           if (Math.abs(v.x) > 0.9 || Math.abs(v.y) > 0.9) continue;
           out.push({ x: ((v.x + 1) / 2) * window.innerWidth, y: ((1 - v.y) / 2) * window.innerHeight });
