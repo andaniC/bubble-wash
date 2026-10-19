@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Bubble Wash">
+  <meta name="theme-color" content="#c3e8f6">
+  <title>Bubble Wash</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #20405a;
+      --soft-ink: #4f6a7e;
+      --accent: #ff7a59;
+      --cream: #fbf3e4;
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: var(--cream);
+      font-family: 'Nunito', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+      color: var(--ink);
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body { position: fixed; inset: 0; }
+    #scene {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+    button {
+      font: inherit;
+      border: 0;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    #mute {
+      position: fixed;
+      top: max(14px, env(safe-area-inset-top));
+      right: max(14px, env(safe-area-inset-right));
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--ink);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 1px 2px rgba(32, 64, 90, 0.12);
+    }
+    #mute svg { width: 24px; height: 24px; }
+    #mute .slash { display: none; }
+    #mute.off .wave { display: none; }
+    #mute.off .slash { display: inline; }
+
+    #hud {
+      position: fixed;
+      top: max(14px, env(safe-area-inset-top));
+      left: max(14px, env(safe-area-inset-left));
+      height: 46px;
+      padding: 0 16px 0 18px;
+      border-radius: 23px;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: 0 1px 2px rgba(32, 64, 90, 0.12);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      font-size: 17px;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+    }
+    #hud.on { opacity: 1; }
+    #slots { display: flex; gap: 6px; }
+    #slots i {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 2px rgba(32, 64, 90, 0.18);
+      transition: transform 0.3s cubic-bezier(.34, 1.56, .64, 1), background 0.3s;
+    }
+    #slots i.filled { box-shadow: none; transform: scale(1.12); }
+
+    #fade {
+      position: fixed;
+      inset: 0;
+      background: var(--scene-bottom, var(--cream));
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.45s ease;
+    }
+    #fade.on { opacity: 1; }
+
+    #title {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 18px;
+      padding: 24px 16px max(32px, env(safe-area-inset-bottom));
+      background: linear-gradient(to bottom, rgba(251, 243, 228, 0) 30%, rgba(251, 243, 228, 0.92) 72%);
+      transition: opacity 0.45s ease, visibility 0.45s;
+    }
+    #title.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+    h1 {
+      margin: 0;
+      font-size: clamp(40px, 8vw, 68px);
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+    #play {
+      width: 128px;
+      height: 128px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 10px 24px rgba(255, 122, 89, 0.35), 0 2px 4px rgba(32, 64, 90, 0.12);
+      transition: transform 0.15s ease;
+    }
+    #play:active { transform: scale(0.94); }
+    #play svg { width: 54px; height: 54px; margin-left: 8px; }
+    #levels {
+      display: flex;
+      gap: 10px;
+      max-width: min(100%, 640px);
+      overflow-x: auto;
+      padding: 6px 4px 10px;
+      scrollbar-width: none;
+      touch-action: pan-x;
+    }
+    #levels::-webkit-scrollbar { display: none; }
+    .chip {
+      flex: none;
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.85);
+      color: var(--ink);
+      font-weight: 800;
+      font-size: 17px;
+      box-shadow: inset 0 0 0 3px var(--chip);
+    }
+    .chip.done { background: var(--chip); }
+    .chip.current { box-shadow: inset 0 0 0 3px var(--chip), 0 0 0 3px var(--ink); }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.min.js",
+        "three/addons/": "./vendor/addons/"
+      }
+    }
+  </script>
+  <script type="module" src="src/main.js"></script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="hud" aria-live="polite">
+    <span id="level-label">Level 1</span>
+    <span id="slots"><i></i><i></i><i></i></span>
+  </div>
+
+  <button id="mute" aria-label="Sound on or off">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none"/>
+      <path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>
+      <path class="slash" d="m16 9 6 6m0-6-6 6"/>
+    </svg>
+  </button>
+
+  <div id="title">
+    <h1>Bubble Wash</h1>
+    <button id="play" aria-label="Play">
+      <svg viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z" fill="#fff"/></svg>
+    </button>
+    <div id="levels" aria-label="Pick a level"></div>
+  </div>
+
+  <div id="fade"></div>
+</body>
+</html>
