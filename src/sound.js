@@ -20,23 +20,36 @@ export function unlock() {
     const data = noise.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
 
-    // Running water: looping noise, band-limited, faded in and out by setWater().
+    // Pressure washer: a hiss of band-limited noise over a low motor hum,
+    // faded in and out together by setWater().
     const src = ctx.createBufferSource();
     src.buffer = noise;
     src.loop = true;
     const hp = ctx.createBiquadFilter();
     hp.type = 'highpass';
-    hp.frequency.value = 500;
+    hp.frequency.value = 900;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 3800;
+    lp.frequency.value = 6500;
     waterGain = ctx.createGain();
     waterGain.gain.value = 0;
     src.connect(hp);
     hp.connect(lp);
     lp.connect(waterGain);
+    const motor = ctx.createOscillator();
+    motor.type = 'sawtooth';
+    motor.frequency.value = 52;
+    const hum = ctx.createBiquadFilter();
+    hum.type = 'lowpass';
+    hum.frequency.value = 220;
+    const humGain = ctx.createGain();
+    humGain.gain.value = 0.5;
+    motor.connect(hum);
+    hum.connect(humGain);
+    humGain.connect(waterGain);
     waterGain.connect(master);
     src.start();
+    motor.start();
   }
   if (ctx.state === 'suspended') ctx.resume();
 }

@@ -1,14 +1,17 @@
 <!doctype html><html><body style="margin:0">
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c3e8f6"/><stop offset="1" stop-color="#e9f6fb"/></linearGradient></defs>
-  <rect width="512" height="512" fill="url(#bg)"/>
-  <g transform="rotate(-14 256 300)">
-    <rect x="132" y="236" width="248" height="128" rx="30" fill="#ffd84d"/>
-    <rect x="132" y="330" width="248" height="46" rx="18" fill="#45b06a"/>
-    <circle cx="180" cy="280" r="9" fill="#f2c53a"/><circle cx="250" cy="300" r="11" fill="#f2c53a"/><circle cx="320" cy="272" r="8" fill="#f2c53a"/><circle cx="215" cy="318" r="7" fill="#f2c53a"/><circle cx="300" cy="320" r="7" fill="#f2c53a"/>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f8fd8"/><stop offset="1" stop-color="#cfe4f4"/></linearGradient>
+    <clipPath id="ball"><circle cx="230" cy="250" r="150"/></clipPath>
+  </defs>
+  <rect width="512" height="512" fill="url(#sky)"/>
+  <g clip-path="url(#ball)">
+    <rect x="60" y="80" width="340" height="340" fill="#6e4a2a"/>
+    <path d="M170 90 C 260 140, 300 230, 290 420 L 400 420 L 400 80 Z" fill="#ffd23a"/>
+    <path d="M250 90 C 330 150, 360 260, 360 420 L 400 420 L 400 80 Z" fill="#ffffff"/>
+    <path d="M170 90 C 200 120, 180 160, 215 175 C 245 190, 240 240, 268 250 C 290 262, 285 320, 300 330 C 310 360, 290 400, 300 420 L 60 420 L 60 80 Z" fill="#6e4a2a"/>
   </g>
-  <g fill="#ffffff">
-    <circle cx="190" cy="200" r="44"/><circle cx="252" cy="178" r="56"/><circle cx="318" cy="204" r="40"/><circle cx="148" cy="232" r="26"/><circle cx="356" cy="236" r="24"/>
-  </g>
-  <g fill="none" stroke="#ffffff" stroke-width="7"><circle cx="360" cy="126" r="22"/><circle cx="150" cy="128" r="14"/></g>
+  <path d="M470 470 L 330 250" stroke="#ffffff" stroke-width="20" stroke-linecap="round" opacity="0.95"/>
+  <circle cx="330" cy="250" r="26" fill="#ffffff" opacity="0.9"/>
+  <rect x="410" y="400" width="90" height="70" rx="18" transform="rotate(-57 455 435)" fill="#2a6fe8"/>
 </svg></body></html>
