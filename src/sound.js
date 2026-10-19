@@ -55,10 +55,10 @@ export function unlock() {
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
 
     // Pressure washer: hiss plus a pump hum. Turbo is the same, sharper.
-    loops.water = noiseLoop([['highpass', 900], ['lowpass', 6500]], 0.22);
+    loops.water = noiseLoop([['highpass', 700], ['lowpass', 7000]], 0.32);
     motor(52, 220, 0.5, loops.water.gain);
     loops.water.gain.connect(master);
-    loops.turbo = noiseLoop([['highpass', 1800], ['lowpass', 9000]], 0.2);
+    loops.turbo = noiseLoop([['highpass', 1500], ['lowpass', 9500]], 0.3);
     motor(64, 260, 0.45, loops.turbo.gain);
     loops.turbo.gain.connect(master);
     // Leaf blower: a deep rush of air over an engine drone.
@@ -154,5 +154,12 @@ export const sfx = {
   leaf: () => burst({ freq: 3000 + Math.random() * 2000, q: 1.2, dur: 0.06, gain: 0.08 }),
   squish: () => burst({ freq: 500 + Math.random() * 300, q: 0.7, dur: 0.12, gain: 0.2 }),
   chip: () => burst({ freq: 2200 + Math.random() * 1500, q: 2, dur: 0.03, gain: 0.05 }),
+  // A clump of mud hitting the ground.
+  splat: () => {
+    burst({ freq: 260 + Math.random() * 120, q: 0.8, dur: 0.14, gain: 0.32 });
+    tone({ freq: 140, to: 70, dur: 0.12, gain: 0.12 });
+  },
+  // A drop landing in a puddle.
+  plink: () => tone({ freq: 900 + Math.random() * 500, to: 400, dur: 0.07, gain: 0.05 }),
   nope: () => tone({ type: 'square', freq: 180, to: 140, dur: 0.15, gain: 0.08 }),
 };

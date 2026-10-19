@@ -1,26 +1,27 @@
 import { Pix, col, hash, fbm, noise } from './pix.js';
 
-// Kinds of mess. `hard` is how long it takes to blast off. Some need the
+// Kinds of mess. `hard` is how long it takes to blast off; `thick` is how
+// caked-on it looks (crusty edges, breaks off in chunks). Some need the
 // right tool: oil and grease barely move until they're soaped, gum needs the
 // turbo nozzle, food comes off best with the sponge, dust and cobwebs blow
 // away with the blower.
 export const DIRT = {
-  web: { name: 'Cobwebs', colors: ['#ececec', '#dadada', '#f6f6f6'], hard: 0.25, blow: 1 },
-  poop: { name: 'Bird poop', colors: ['#f4f2ea', '#e1ded3', '#cfcbbf', '#ffffff'], hard: 1.1 },
-  food: { name: 'Food', colors: ['#b8321f', '#c9481f', '#8a5a2b', '#e0b85a', '#9e2a18'], hard: 1, sponge: 3 },
-  paint: { name: 'Graffiti', colors: ['#e83f6f'], hard: 2.4 },
-  gum: { name: 'Gum', colors: ['#e58bb0', '#d4769d', '#a8a8a8'], hard: 4, turbo: true },
-  bugs: { name: 'Bugs', colors: ['#2a2622', '#4a3b2a', '#6b7a2a', '#3a3328'], hard: 0.8 },
-  dung: { name: 'Dung', colors: ['#5a4a22', '#4a3c1a', '#6b5a2a'], hard: 1.2 },
-  oil: { name: 'Oil', colors: ['#1c1b20', '#25242a', '#2f2d35'], hard: 2, soap: true },
-  grease: { name: 'Grease', colors: ['#4a3a22', '#5a4628', '#3c2f1c'], hard: 1.8, soap: true },
-  mud: { name: 'Mud', colors: ['#6b4a2b', '#7a5533', '#5a3d22', '#87603a'], hard: 1 },
-  barnacles: { name: 'Barnacles', colors: ['#b9b3a6', '#d6d0c2', '#8f897d', '#6f6a60'], hard: 3 },
-  moss: { name: 'Moss', colors: ['#4f6b2a', '#5f7d33', '#3f5a22', '#71903e'], hard: 1.4 },
-  algae: { name: 'Algae', colors: ['#3e7a3a', '#4d8c43', '#2f6630', '#5a9a4a'], hard: 1.1 },
-  soot: { name: 'Soot', colors: ['#2a2a2a', '#353535', '#1f1f1f'], hard: 1.2 },
-  grime: { name: 'Grime', colors: ['#56524a', '#4a463f', '#615c53'], hard: 0.9 },
-  dust: { name: 'Dust', colors: ['#bba98a', '#ad9b7d', '#c6b597'], hard: 0.4, blow: 1 },
+  web: { name: 'Cobwebs', colors: ['#ececec', '#dadada', '#f6f6f6'], hard: 0.25, thick: 0, blow: 1 },
+  poop: { name: 'Bird poop', colors: ['#f4f2ea', '#e1ded3', '#cfcbbf', '#ffffff'], hard: 1.1, thick: 0.8 },
+  food: { name: 'Food', colors: ['#b8321f', '#c9481f', '#8a5a2b', '#e0b85a', '#9e2a18'], hard: 1, thick: 0.7, sponge: 3 },
+  paint: { name: 'Graffiti', colors: ['#e83f6f'], hard: 2.4, thick: 0.1 },
+  gum: { name: 'Gum', colors: ['#e58bb0', '#d4769d', '#a8a8a8'], hard: 4, thick: 1, turbo: true },
+  bugs: { name: 'Bugs', colors: ['#2a2622', '#4a3b2a', '#6b7a2a', '#3a3328'], hard: 0.8, thick: 0.5 },
+  dung: { name: 'Dung', colors: ['#5a4a22', '#4a3c1a', '#6b5a2a'], hard: 1.2, thick: 1 },
+  oil: { name: 'Oil', colors: ['#1c1b20', '#25242a', '#2f2d35'], hard: 2, thick: 0, soap: true },
+  grease: { name: 'Grease', colors: ['#4a3a22', '#5a4628', '#3c2f1c'], hard: 1.8, thick: 0.4, soap: true },
+  mud: { name: 'Mud', colors: ['#6b4a2b', '#7a5533', '#5a3d22', '#87603a'], hard: 1, thick: 1 },
+  barnacles: { name: 'Barnacles', colors: ['#b9b3a6', '#d6d0c2', '#8f897d', '#6f6a60'], hard: 3, thick: 1 },
+  moss: { name: 'Moss', colors: ['#4f6b2a', '#5f7d33', '#3f5a22', '#71903e'], hard: 1.4, thick: 0.6 },
+  algae: { name: 'Algae', colors: ['#3e7a3a', '#4d8c43', '#2f6630', '#5a9a4a'], hard: 1.1, thick: 0.4 },
+  soot: { name: 'Soot', colors: ['#2a2a2a', '#353535', '#1f1f1f'], hard: 1.2, thick: 0.2 },
+  grime: { name: 'Grime', colors: ['#56524a', '#4a463f', '#615c53'], hard: 0.9, thick: 0.3 },
+  dust: { name: 'Dust', colors: ['#bba98a', '#ad9b7d', '#c6b597'], hard: 0.4, thick: 0.15, blow: 1 },
 };
 
 // Drawing order, top first: the first layer with mess on a pixel is what shows.

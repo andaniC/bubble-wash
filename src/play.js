@@ -98,6 +98,18 @@ export class Play {
       for (const L of this.layers) this.partTotal[p] += L.amount[i];
     }
     this.partLeft.set(this.partTotal);
+
+    // Side views: the ground is just under the lowest part of the object;
+    // runoff and falling mud land there and form puddles.
+    let lowest = 0;
+    for (let i = 0; i < n; i++) if (this.part[i]) lowest = Math.max(lowest, (i / this.w) | 0);
+    this.groundY = Math.min(this.h - 2, lowest + 1);
+    this.puddle = new Float32Array(this.w);
+    this.puddleDirt = new Float32Array(this.w);
+    this.ripples = [];
+    this.puddleTimer = 0;
+    this.runoffCarry = 0;
+    this.lastDirt = null;
     this.done = this.partTotal.map((t, p) => (p === 0 || t === 0 ? 1 : 0));
     this.dirtTotal = this.partTotal.reduce((a, b) => a + b, 0);
 
@@ -175,17 +187,34 @@ export class Play {
 
   // ---------- drawing the scene ----------
 
+  // Which mess layer shows on pixel i (-1 for none).
+  top(i) {
+    if (i < 0 || i >= this.n) return -1;
+    const { layers, thr } = this;
+    for (let k = 0; k < layers.length; k++) if (layers[k].amount[i] > thr[i]) return k;
+    return -1;
+  }
+
   compose(x0, y0, x1, y1) {
-    const { w, base, layers, wet, foam, thr, foamThr, out } = this;
+    const { w, base, layers, wet, foam, foamThr, out } = this;
     for (let y = y0; y <= y1; y++) {
       let i = y * w + x0;
       for (let x = x0; x <= x1; x++, i++) {
         let c = base[i];
-        for (let k = 0; k < layers.length; k++) {
-          if (layers[k].amount[i] > thr[i]) {
-            c = layers[k].color[i];
-            break;
+        const k = this.top(i);
+        if (k >= 0) {
+          c = layers[k].color[i];
+          // Caked-on mess: a lit top-left rim and a dark bottom-right rim.
+          const t = layers[k].def.thick;
+          if (t) {
+            if (this.top(i - w) < 0 || (x > 0 && this.top(i - 1) < 0)) c = shade(c, 1 + 0.3 * t);
+            else if (this.top(i + w) < 0 || (x < w - 1 && this.top(i + 1) < 0)) c = shade(c, 1 - 0.38 * t);
           }
+        } else if (y > 0) {
+          // Clean surface just under a lump of mess sits in its shadow.
+          const above = this.top(i - w);
+          const t = above >= 0 ? layers[above].def.thick : x > 0 && this.top(i - w - 1) >= 0 ? layers[this.top(i - w - 1)].def.thick * 0.6 : 0;
+          if (t) c = shade(c, 1 - 0.24 * t);
         }
         const wt = wet[i];
         if (wt) {
@@ -212,6 +241,7 @@ export class Play {
   // The washer and turbo nozzle: peel the top layer of mess off each pixel.
   spray(cx, cy, r, amount, tool) {
     const { w, h, part, layers, wet, foam } = this;
+    let thickHit = 0;
     const x0 = Math.max(0, Math.floor(cx - r));
     const x1 = Math.min(w - 1, Math.ceil(cx + r));
     const y0 = Math.max(0, Math.floor(cy - r));
@@ -240,14 +270,62 @@ export class Play {
           L.amount[i] = na;
           this.partLeft[p] -= a - na;
           if (Math.random() < 0.012 * this.chipRate) this.chip(x, y, L.color[i]);
-          if (this.s.view === 'side' && Math.random() < 0.004) this.drip(x, y, L.color[i]);
+          if (L.def.thick >= 0.5) thickHit++;
+          this.lastDirt = L.color[i];
           break;
         }
       }
     }
-    this.mark('dirty', x0, y0, x1, y1);
+    this.mark('dirty', Math.max(0, x0 - 2), Math.max(0, y0 - 2), Math.min(w - 1, x1 + 2), Math.min(h - 1, y1 + 2));
     this.mark('active', x0, y0, x1, y1);
     this.nudgeLeaves(cx, cy, r + 5, 60);
+    // Caked mess cracks off around the edge of the jet in clumps.
+    if (thickHit) {
+      const chance = Math.min(3, amount * 9 * this.chipRate);
+      for (let k = Math.floor(chance) + (Math.random() < chance % 1 ? 1 : 0); k > 0; k--) this.breakChunk(cx, cy, r);
+    }
+  }
+
+  breakChunk(cx, cy, r) {
+    const { w, h, layers, thr } = this;
+    const a = Math.random() * Math.PI * 2;
+    const d = r * (0.7 + Math.random() * 0.6);
+    const px = Math.round(cx + Math.cos(a) * d);
+    const py = Math.round(cy + Math.sin(a) * d);
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
+    const k = this.top(py * w + px);
+    if (k < 0 || layers[k].def.thick < 0.5) return;
+    const L = layers[k];
+    const rr = 1.5 + Math.random() * 2.5;
+    const bits = [];
+    for (let y = Math.floor(py - rr); y <= py + rr; y++) {
+      for (let x = Math.floor(px - rr); x <= px + rr; x++) {
+        if (x < 0 || y < 0 || x >= w || y >= h || (x - px) ** 2 + (y - py) ** 2 > rr * rr) continue;
+        const i = y * w + x;
+        const p = this.part[i];
+        if (!p || this.done[p] || L.amount[i] <= thr[i]) continue;
+        bits.push([x - px, y - py, shade(L.color[i], 0.9 + Math.random() * 0.2)]);
+        this.partLeft[p] -= L.amount[i];
+        L.amount[i] = 0;
+      }
+    }
+    if (bits.length < 3) return;
+    this.mark('dirty', Math.max(0, px - 6), Math.max(0, py - 6), Math.min(w - 1, px + 6), Math.min(h - 1, py + 6));
+    const side = this.s.view === 'side';
+    const out = Math.atan2(py - cy, px - cx);
+    this.add({
+      x: px,
+      y: py,
+      vx: Math.cos(out) * (side ? 25 : 90 + Math.random() * 60),
+      vy: side ? -15 + Math.random() * 25 : Math.sin(out) * (90 + Math.random() * 60),
+      g: side ? 420 : 0,
+      drag: side ? 0 : 3.5,
+      life: side ? 3 : 0.9,
+      bits,
+      lands: side,
+      c: bits[0][2],
+      size: 1,
+    });
   }
 
   soap(cx, cy, dt) {
@@ -378,10 +456,6 @@ export class Play {
     this.add({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - (this.s.view === 'side' ? 40 : 0), g: this.s.view === 'side' ? 260 : 0, life: 0.5, c, size: 1 + (Math.random() < 0.3 ? 1 : 0), fade: false });
   }
 
-  drip(x, y, c) {
-    this.add({ x, y, vx: 0, vy: 22 + Math.random() * 18, g: 0, life: 0.9 + Math.random() * 0.6, c: mix(c, col('#8fb6c8'), 0.4), size: 1, drip: true });
-  }
-
   puff(x, y, c) {
     this.add({ x, y, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 40 - 10, g: 0, life: 0.6, c, size: 2, fade: true });
   }
@@ -392,6 +466,28 @@ export class Play {
       const a = side ? -Math.PI / 2 + (Math.random() - 0.5) * 2.4 : Math.random() * Math.PI * 2;
       const v = (40 + Math.random() * 90) * speed;
       this.add({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: side ? 300 : 0, life: 0.25 + Math.random() * 0.2, c: col(Math.random() < 0.5 ? '#ffffff' : '#bfe3f2'), size: 1 });
+    }
+  }
+
+  // Something hit the ground under a side-view object.
+  land(p) {
+    const x = Math.round(p.x);
+    if (p.bits) {
+      // A clump of mud splats and breaks up.
+      for (let k = 0; k < Math.min(8, p.bits.length); k++) {
+        this.add({ x: p.x, y: this.groundY - 1, vx: (Math.random() - 0.5) * 80, vy: -40 - Math.random() * 60, g: 360, life: 0.4, c: p.bits[k][2], size: 1 });
+      }
+      this.puddleDirt[x] = Math.min(1, this.puddleDirt[x] + 0.25);
+      this.puddle[x] += 0.05;
+      if (Math.random() < 0.7) sfx.splat();
+      return;
+    }
+    const water = p.runoff === false || p.dirty !== undefined ? 0.13 : 0.025;
+    this.puddle[x] += water;
+    if (p.dirty) this.puddleDirt[x] = Math.min(1, this.puddleDirt[x] + p.dirty * 0.05);
+    if (Math.random() < 0.06) {
+      this.ripples.push({ x, t: 0 });
+      if (Math.random() < 0.25) sfx.plink();
     }
   }
 
@@ -420,8 +516,18 @@ export class Play {
         const r = nz.r * (t === 'washer' ? 1 + this.wide * 0.3 : 1);
         this.chipRate = nz.chips;
         this.spray(tx, ty, r, nz.power * this.power * dt, nz.grip);
-        this.mist(tx, ty, nz.mist, nz.shake ? 1.6 : 1);
+        this.mist(tx, ty, nz.mist + 2, nz.shake ? 1.6 : 1.2);
         if (nz.push) this.nudgeLeaves(tx, ty, r + 24, nz.push);
+        if (this.s.view === 'side') {
+          // Water streams down the surface from where the jet hits.
+          this.runoffCarry += dt * (20 + nz.power * 14);
+          for (; this.runoffCarry >= 1; this.runoffCarry--) {
+            const x = tx + (Math.random() - 0.5) * r * 1.6;
+            const water = col('#9cc4d8');
+            this.add({ x, y: ty + r * 0.5, vx: 0, vy: 26 + Math.random() * 34, g: 0, life: 5, c: this.lastDirt ? mix(water, this.lastDirt, 0.55) : water, size: 1, runoff: true, dirty: this.lastDirt ? 0.5 : 0 });
+          }
+          this.lastDirt = null;
+        }
         if (nz.shake) {
           this.shake = Math.max(this.shake, nz.shake);
           this.kick = Math.min(1, this.kick + dt * 6);
@@ -467,21 +573,57 @@ export class Play {
       this.hooks.part?.('Leaves');
     }
 
+    const side = this.s.view === 'side';
     for (let k = this.particles.length - 1; k >= 0; k--) {
       const p = this.particles[k];
       p.life -= dt;
       p.vy += p.g * dt;
+      if (p.drag) {
+        const d = Math.exp(-dt * p.drag);
+        p.vx *= d;
+        p.vy *= d;
+      }
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      if (p.drip) {
+      if (p.runoff) {
         const i = (p.y | 0) * this.w + (p.x | 0);
-        if (p.y >= this.h || !this.part[i]) p.life = 0;
-        else {
-          this.wet[i] = Math.max(this.wet[i], 200);
+        if (p.y < this.h && this.part[i]) {
+          // Still running down the object: leave a wet trail, wander a little.
+          this.wet[i] = Math.max(this.wet[i], 230);
           this.mark('dirty', p.x | 0, p.y | 0, p.x | 0, p.y | 0);
+          this.mark('active', p.x | 0, p.y | 0, p.x | 0, p.y | 0);
+          p.vx = (Math.random() - 0.5) * 12;
+        } else {
+          // Off the bottom edge: now it falls.
+          p.runoff = false;
+          p.g = 520;
+          p.lands = true;
+          p.vx = 0;
         }
       }
+      if (side && (p.lands || p.g > 0) && p.y >= this.groundY && p.x >= 0 && p.x < this.w) {
+        this.land(p);
+        p.life = 0;
+      }
       if (p.life <= 0) this.particles.splice(k, 1);
+    }
+
+    // Puddles spread out and slowly soak away.
+    this.puddleTimer += dt;
+    if (side && this.puddleTimer > 0.1) {
+      this.puddleTimer = 0;
+      const pu = this.puddle;
+      const next = new Float32Array(pu.length);
+      for (let x = 0; x < pu.length; x++) {
+        const l = pu[x - 1] ?? pu[x];
+        const r = pu[x + 1] ?? pu[x];
+        next[x] = Math.max(0, (pu[x] * 0.6 + (l + r) * 0.2) * 0.997 - 0.0004);
+      }
+      this.puddle = next;
+    }
+    for (let k = this.ripples.length - 1; k >= 0; k--) {
+      this.ripples[k].t += dt;
+      if (this.ripples[k].t > 0.5) this.ripples.splice(k, 1);
     }
 
     // Wet spots dry and foam slowly pops.
@@ -581,7 +723,52 @@ export class Play {
       ctx.fillRect(Math.round(leaf.x - cam), Math.round(leaf.y), 1, 1);
     }
 
+    // Puddles under side-view objects, tinted by the mud washed into them.
+    if (this.s.view === 'side') {
+      const gy = this.groundY;
+      for (let x = Math.max(0, cam); x < Math.min(this.w, cam + VIEW_W); x++) {
+        const a = this.puddle[x];
+        if (a < 0.03) continue;
+        const depth = a > 1 ? 4 : a > 0.5 ? 3 : a > 0.2 ? 2 : 1;
+        const tint = mix(col('#8fb3c8'), col('#6b4a2b'), Math.min(0.85, this.puddleDirt[x]));
+        ctx.globalAlpha = Math.min(0.9, 0.4 + a);
+        ctx.fillStyle = CSS(tint);
+        ctx.fillRect(x - cam, gy - depth + 1, 1, depth);
+        ctx.fillStyle = CSS(mix(tint, col('#e6f3fa'), 0.55));
+        ctx.fillRect(x - cam, gy - depth + 1, 1, 1);
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      for (const r of this.ripples) {
+        const d = Math.round(1 + r.t * 10);
+        ctx.fillRect(r.x - cam - d, this.groundY - 1, 1, 1);
+        ctx.fillRect(r.x - cam + d, this.groundY - 1, 1, 1);
+      }
+    }
+
+    // Wet surfaces catch the light.
+    const wetLook = this.s.view === 'top';
+    for (let k = 0; k < 60; k++) {
+      const x = cam + Math.floor(Math.random() * VIEW_W);
+      const y = Math.floor(Math.random() * VIEW_H);
+      if (x >= this.w) continue;
+      const i = y * this.w + x;
+      if (this.wet[i] < 140 || (!wetLook && !this.part[i])) continue;
+      ctx.globalAlpha = (this.wet[i] / 255) * 0.85;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x - cam, y, 1, 1);
+    }
+    ctx.globalAlpha = 1;
+
     for (const p of this.particles) {
+      if (p.bits) {
+        ctx.globalAlpha = p.lands ? 1 : Math.max(0, Math.min(1, p.life / 0.4));
+        for (const [dx, dy, c] of p.bits) {
+          ctx.fillStyle = CSS(c);
+          ctx.fillRect(Math.round(p.x + dx - cam), Math.round(p.y + dy), 1, 1);
+        }
+        continue;
+      }
       ctx.globalAlpha = p.fade ? Math.max(0, p.life / 0.6) : 1;
       ctx.fillStyle = CSS(p.c);
       ctx.fillRect(Math.round(p.x - cam), Math.round(p.y), p.size, p.size);
