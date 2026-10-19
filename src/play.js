@@ -1,0 +1,656 @@
+import { LAYER_ORDER } from './scene.js';
+import { hash, fbm, noise, shade, mix, rgba, red, green, blue, col } from './pix.js';
+import { sfx, setLoop } from './sound.js';
+
+// One job being washed: holds how much mess is left on every pixel, how wet
+// and foamy each pixel is, the leaves lying about, and draws it all.
+
+export const VIEW_W = 320;
+export const VIEW_H = 240;
+
+export const TOOLS = {
+  washer: { name: 'Washer', loop: 'water' },
+  turbo: { name: 'Turbo', loop: 'turbo' },
+  soap: { name: 'Soap', loop: 'soap' },
+  blower: { name: 'Blower', loop: 'blower' },
+  sponge: { name: 'Sponge', loop: null },
+};
+
+const LEAF_COLORS = ['#c8642a', '#d9902e', '#b0461f', '#e0b23a', '#8a5a2a', '#9a8a2a'].map(col);
+const LEAF_SHAPE = [];
+for (let v = -2; v <= 2; v++) for (let u = -3; u <= 3; u++) if (Math.abs(v) <= 2 - Math.abs(u) / 2) LEAF_SHAPE.push([u, v]);
+LEAF_SHAPE.push([4, 0]);
+
+const FOAM = col('#f6fafc');
+const FOAM_SHADE = col('#d9e6ee');
+const CSS = (c) => `rgb(${red(c)},${green(c)},${blue(c)})`;
+
+// How well each tool shifts each kind of mess (1 = normal).
+function grip(type, tool, foamed) {
+  let m = 1;
+  if (type === 'oil' || type === 'grease') m = foamed ? 2.6 : 0.12;
+  else if (type === 'gum') m = tool === 'turbo' ? 1 : 0.07;
+  else if (type === 'paint') m = (tool === 'turbo' ? 1.3 : 0.45) * (foamed ? 1.8 : 1);
+  else if (type === 'barnacles') m = tool === 'turbo' ? 1.6 : 0.45;
+  else if (type === 'web') m = 3;
+  else if (type === 'dust') m = 2;
+  return foamed ? m * 1.25 : m;
+}
+
+export class Play {
+  constructor(scene, canvas, { power = 1, wide = 0, hooks = {} } = {}) {
+    this.s = scene;
+    this.w = scene.w;
+    this.h = scene.h;
+    const n = this.w * this.h;
+    this.n = n;
+    this.base = scene.pix.data;
+    this.part = scene.pix.part;
+    this.layers = LAYER_ORDER.filter((k) => scene.layers.has(k)).map((k) => scene.layers.get(k));
+    this.power = power;
+    this.wide = wide;
+    this.hooks = hooks;
+    this.tool = 'washer';
+
+    // Ragged edges: each pixel shows mess until its amount drops below a
+    // noisy threshold, so dirt breaks up in clumps as it washes away.
+    this.thr = new Uint8Array(n);
+    this.foamThr = new Uint8Array(n);
+    for (let y = 0; y < this.h; y++) {
+      for (let x = 0; x < this.w; x++) {
+        const i = y * this.w + x;
+        const e = Math.min(1, Math.max(0, fbm(x / 5, y / 5, 3, 77) * 1.5 - 0.25)) * 0.82 + hash(x, y, 78) * 0.18;
+        this.thr[i] = 14 + e * 200;
+        this.foamThr[i] = 30 + (noise(x / 2.2, y / 2.2, 79) * 0.6 + hash(x, y, 80) * 0.4) * 200;
+      }
+    }
+    this.wet = new Uint8Array(n);
+    this.foam = new Uint8Array(n);
+    // Mess too thin to see doesn't count (and could never be found).
+    for (const L of this.layers) for (let i = 0; i < n; i++) if (L.amount[i] <= this.thr[i]) L.amount[i] = 0;
+
+    const P = scene.parts.length;
+    this.partTotal = new Float64Array(P);
+    this.partLeft = new Float64Array(P);
+    this.partBox = Array.from({ length: P }, () => [Infinity, Infinity, -Infinity, -Infinity]);
+    for (let i = 0; i < n; i++) {
+      const p = this.part[i];
+      if (!p) continue;
+      const b = this.partBox[p];
+      const x = i % this.w;
+      const y = (i / this.w) | 0;
+      if (x < b[0]) b[0] = x;
+      if (y < b[1]) b[1] = y;
+      if (x > b[2]) b[2] = x;
+      if (y > b[3]) b[3] = y;
+      for (const L of this.layers) this.partTotal[p] += L.amount[i];
+    }
+    this.partLeft.set(this.partTotal);
+    this.done = this.partTotal.map((t, p) => (p === 0 || t === 0 ? 1 : 0));
+    this.dirtTotal = this.partTotal.reduce((a, b) => a + b, 0);
+
+    this.leaves = scene.leafSpots.map(([x, y, k]) => ({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      rot: (k % 8) * 0.8,
+      vr: 0,
+      color: LEAF_COLORS[k % LEAF_COLORS.length],
+    }));
+    this.leafTotal = this.leaves.length;
+    this.leafWeight = this.leafTotal ? (this.dirtTotal * 0.25) / this.leafTotal : 0;
+    this.leavesDone = this.leafTotal === 0;
+
+    this.sceneCanvas = document.createElement('canvas');
+    this.sceneCanvas.width = this.w;
+    this.sceneCanvas.height = this.h;
+    this.sctx = this.sceneCanvas.getContext('2d');
+    this.img = this.sctx.createImageData(this.w, this.h);
+    this.out = new Uint32Array(this.img.data.buffer);
+    this.compose(0, 0, this.w - 1, this.h - 1);
+    this.flush();
+
+    this.ctx = canvas.getContext('2d');
+    this.ctx.imageSmoothingEnabled = false;
+    this.camX = 0;
+    this.maxCam = Math.max(0, this.w - VIEW_W);
+    this.pointer = { down: false, x: 0, y: 0, moved: 0 };
+    this.particles = [];
+    this.flashes = [];
+    this.time = 0;
+    this.dryTimer = 0;
+    this.active = null; // box of pixels that are wet or foamy
+    this.dirty = null; // box of pixels to redraw this frame
+    this.finished = false;
+    this.lastSound = 0;
+    this.weak = null; // a kind of mess the current tool can barely shift
+  }
+
+  // ---------- bookkeeping ----------
+
+  mark(box, x0, y0, x1, y1) {
+    if (!this[box]) this[box] = [x0, y0, x1, y1];
+    else {
+      const b = this[box];
+      if (x0 < b[0]) b[0] = x0;
+      if (y0 < b[1]) b[1] = y0;
+      if (x1 > b[2]) b[2] = x1;
+      if (y1 > b[3]) b[3] = y1;
+    }
+  }
+
+  progress() {
+    let left = 0;
+    for (let p = 1; p < this.partLeft.length; p++) left += this.done[p] ? 0 : this.partLeft[p];
+    const total = this.dirtTotal + this.leafTotal * this.leafWeight;
+    if (!total) return 1;
+    return 1 - (left + this.leaves.length * this.leafWeight) / total;
+  }
+
+  partsList() {
+    const list = [];
+    for (let p = 1; p < this.s.parts.length; p++) {
+      if (!this.partTotal[p]) continue;
+      list.push({ name: this.s.parts[p].name, done: !!this.done[p], pct: 1 - this.partLeft[p] / this.partTotal[p] });
+    }
+    if (this.leafTotal) list.push({ name: 'Leaves', done: this.leavesDone, pct: 1 - this.leaves.length / this.leafTotal });
+    return list;
+  }
+
+  // ---------- drawing the scene ----------
+
+  compose(x0, y0, x1, y1) {
+    const { w, base, layers, wet, foam, thr, foamThr, out } = this;
+    for (let y = y0; y <= y1; y++) {
+      let i = y * w + x0;
+      for (let x = x0; x <= x1; x++, i++) {
+        let c = base[i];
+        for (let k = 0; k < layers.length; k++) {
+          if (layers[k].amount[i] > thr[i]) {
+            c = layers[k].color[i];
+            break;
+          }
+        }
+        const wt = wet[i];
+        if (wt) {
+          const k = 1 - wt * 0.0011;
+          c = rgba(red(c) * k, green(c) * k, Math.min(255, blue(c) * k + wt * 0.03));
+        }
+        const f = foam[i];
+        if (f > foamThr[i]) c = f - foamThr[i] < 18 ? FOAM_SHADE : FOAM;
+        out[i] = c;
+      }
+    }
+    this.mark('pending', x0, y0, x1, y1);
+  }
+
+  flush() {
+    const b = this.pending;
+    if (!b) return;
+    this.sctx.putImageData(this.img, 0, 0, b[0], b[1], b[2] - b[0] + 1, b[3] - b[1] + 1);
+    this.pending = null;
+  }
+
+  // ---------- tools ----------
+
+  // The washer and turbo nozzle: peel the top layer of mess off each pixel.
+  spray(cx, cy, r, amount, tool) {
+    const { w, h, part, layers, wet, foam } = this;
+    const x0 = Math.max(0, Math.floor(cx - r));
+    const x1 = Math.min(w - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r));
+    const y1 = Math.min(h - 1, Math.ceil(cy + r));
+    const r2 = r * r;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const d2 = (x - cx) ** 2 + (y - cy) ** 2;
+        if (d2 > r2) continue;
+        const fall = 1 - d2 / r2;
+        const i = y * w + x;
+        // Things get wet; so does the ground in top-down jobs, but not the sky.
+        if (part[i] || this.s.view === 'top') wet[i] = 255;
+        const foamed = foam[i] > 40;
+        if (foam[i]) foam[i] = Math.max(0, foam[i] - 1400 * amount * fall);
+        const p = part[i];
+        if (!p || this.done[p]) continue;
+        for (let k = 0; k < layers.length; k++) {
+          const L = layers[k];
+          const a = L.amount[i];
+          if (!a) continue;
+          const g = grip(L.type, tool, foamed);
+          if (g < 0.2) this.weak = L.type;
+          const take = (fall * amount * 640 * g) / L.def.hard;
+          const na = a - take <= this.thr[i] ? 0 : Math.floor(a - take); // looks clean = is clean
+          L.amount[i] = na;
+          this.partLeft[p] -= a - na;
+          if (Math.random() < 0.012) this.chip(x, y, L.color[i]);
+          if (this.s.view === 'side' && Math.random() < 0.004) this.drip(x, y, L.color[i]);
+          break;
+        }
+      }
+    }
+    this.mark('dirty', x0, y0, x1, y1);
+    this.mark('active', x0, y0, x1, y1);
+    this.nudgeLeaves(cx, cy, r + 5, 60);
+  }
+
+  soap(cx, cy, dt) {
+    const r = 13;
+    const { w, h, foam } = this;
+    const x0 = Math.max(0, Math.floor(cx - r));
+    const x1 = Math.min(w - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r));
+    const y1 = Math.min(h - 1, Math.ceil(cy + r));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const d2 = (x - cx) ** 2 + (y - cy) ** 2;
+        if (d2 > r * r) continue;
+        const i = y * w + x;
+        if (!this.part[i]) continue;
+        foam[i] = Math.min(255, foam[i] + 1100 * dt * (1 - d2 / (r * r)) + 20);
+      }
+    }
+    this.mark('dirty', x0, y0, x1, y1);
+    this.mark('active', x0, y0, x1, y1);
+  }
+
+  scrub(cx, cy, dt, speed) {
+    const k = Math.min(1, speed / 140);
+    if (k < 0.05) return;
+    const r = 10;
+    const { w, h, part, layers, foam } = this;
+    const x0 = Math.max(0, Math.floor(cx - r));
+    const x1 = Math.min(w - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r));
+    const y1 = Math.min(h - 1, Math.ceil(cy + r));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const d2 = (x - cx) ** 2 + (y - cy) ** 2;
+        if (d2 > r * r) continue;
+        const fall = 1 - d2 / (r * r);
+        const i = y * w + x;
+        const p = part[i];
+        if (!p || this.done[p]) continue;
+        foam[i] = Math.min(255, foam[i] + 260 * dt * k);
+        for (let j = 0; j < layers.length; j++) {
+          const L = layers[j];
+          const a = L.amount[i];
+          if (!a) continue;
+          const t = L.type;
+          const m = t === 'food' ? 3.2 : t === 'grime' || t === 'grease' ? 2 : t === 'gum' || t === 'barnacles' ? 0.1 : 0.7;
+          const take = (fall * k * dt * 520 * m) / L.def.hard;
+          const na = a - take <= this.thr[i] ? 0 : Math.floor(a - take); // looks clean = is clean
+          L.amount[i] = na;
+          this.partLeft[p] -= a - na;
+          break;
+        }
+      }
+    }
+    this.mark('dirty', x0, y0, x1, y1);
+    this.mark('active', x0, y0, x1, y1);
+    if (this.time - this.lastSound > 0.16) {
+      sfx.squish();
+      this.lastSound = this.time;
+    }
+  }
+
+  blow(cx, cy, dt, fromX, fromY) {
+    const len = Math.hypot(cx - fromX, cy - fromY) || 1;
+    const ax = (cx - fromX) / len;
+    const ay = (cy - fromY) / len;
+    const R = 42;
+    for (const leaf of this.leaves) {
+      const dx = leaf.x - cx;
+      const dy = leaf.y - cy;
+      const d = Math.hypot(dx, dy) || 1;
+      if (d > R) continue;
+      const f = (1 - d / R) * 1100 * dt;
+      leaf.vx += (ax * 0.75 + (dx / d) * 0.6) * f;
+      leaf.vy += (ay * 0.75 + (dy / d) * 0.6) * f;
+      leaf.vr += (Math.random() - 0.5) * 30 * dt;
+    }
+    // Dust and cobwebs blow away too.
+    const r = 15;
+    const { w, h, part, layers } = this;
+    const x0 = Math.max(0, Math.floor(cx - r));
+    const x1 = Math.min(w - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r));
+    const y1 = Math.min(h - 1, Math.ceil(cy + r));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const d2 = (x - cx) ** 2 + (y - cy) ** 2;
+        if (d2 > r * r) continue;
+        const i = y * w + x;
+        const p = part[i];
+        if (!p || this.done[p]) continue;
+        for (const L of layers) {
+          const a = L.amount[i];
+          if (!a) continue;
+          if (!L.def.blow) break;
+          const take = (1 - d2 / (r * r)) * dt * 700;
+          const na = a - take <= this.thr[i] ? 0 : Math.floor(a - take); // looks clean = is clean
+          L.amount[i] = na;
+          this.partLeft[p] -= a - na;
+          if (Math.random() < 0.02) this.puff(x, y, L.color[i]);
+          break;
+        }
+      }
+    }
+    this.mark('dirty', x0, y0, x1, y1);
+  }
+
+  nudgeLeaves(cx, cy, R, strength) {
+    for (const leaf of this.leaves) {
+      const dx = leaf.x - cx;
+      const dy = leaf.y - cy;
+      const d = Math.hypot(dx, dy) || 1;
+      if (d > R) continue;
+      leaf.vx += (dx / d) * strength * 0.1;
+      leaf.vy += (dy / d) * strength * 0.1;
+    }
+  }
+
+  // ---------- particles ----------
+
+  add(p) {
+    if (this.particles.length < 700) this.particles.push(p);
+  }
+
+  chip(x, y, c) {
+    const a = Math.random() * Math.PI * 2;
+    const v = 30 + Math.random() * 70;
+    this.add({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - (this.s.view === 'side' ? 40 : 0), g: this.s.view === 'side' ? 260 : 0, life: 0.5, c, size: 1 + (Math.random() < 0.3 ? 1 : 0), fade: false });
+  }
+
+  drip(x, y, c) {
+    this.add({ x, y, vx: 0, vy: 22 + Math.random() * 18, g: 0, life: 0.9 + Math.random() * 0.6, c: mix(c, col('#8fb6c8'), 0.4), size: 1, drip: true });
+  }
+
+  puff(x, y, c) {
+    this.add({ x, y, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 40 - 10, g: 0, life: 0.6, c, size: 2, fade: true });
+  }
+
+  mist(x, y) {
+    const side = this.s.view === 'side';
+    for (let k = 0; k < 3; k++) {
+      const a = side ? -Math.PI / 2 + (Math.random() - 0.5) * 2.4 : Math.random() * Math.PI * 2;
+      const v = 40 + Math.random() * 90;
+      this.add({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: side ? 300 : 0, life: 0.25 + Math.random() * 0.2, c: col(Math.random() < 0.5 ? '#ffffff' : '#bfe3f2'), size: 1 });
+    }
+  }
+
+  // ---------- frame ----------
+
+  setTool(t) {
+    this.tool = t;
+  }
+
+  update(dt) {
+    this.time += dt;
+    const ptr = this.pointer;
+    const tx = ptr.x + this.camX;
+    const ty = ptr.y;
+    let loop = null;
+
+    if (ptr.down && !this.finished) {
+      // Spraying near the edge of the screen walks you along wide jobs.
+      if (ptr.x < 40) this.camX -= (40 - ptr.x) * 4 * dt;
+      if (ptr.x > VIEW_W - 40) this.camX += (ptr.x - (VIEW_W - 40)) * 4 * dt;
+      this.camX = Math.max(0, Math.min(this.maxCam, this.camX));
+
+      const t = this.tool;
+      if (t === 'washer' || t === 'turbo') {
+        const r = t === 'turbo' ? 3.4 : 8 * (1 + this.wide * 0.3);
+        const strength = (t === 'turbo' ? 3 : 1) * this.power;
+        this.spray(tx, ty, r, strength * dt, t);
+        this.mist(tx, ty);
+        loop = t === 'turbo' ? 'turbo' : 'water';
+      } else if (t === 'soap') {
+        this.soap(tx, ty, dt);
+        loop = 'soap';
+        for (let k = 0; k < 2; k++) this.add({ x: tx + (Math.random() - 0.5) * 16, y: ty + (Math.random() - 0.5) * 16, vx: 0, vy: 0, g: 0, life: 0.3, c: FOAM, size: 2 });
+      } else if (t === 'blower') {
+        const origin = this.toolOrigin();
+        this.blow(tx, ty, dt, origin[0] + this.camX, origin[1]);
+        loop = 'blower';
+      } else if (t === 'sponge') {
+        this.scrub(tx, ty, dt, ptr.moved / dt);
+      }
+    }
+    ptr.moved = 0;
+    setLoop(loop);
+
+    // Leaves drift and slide to a stop; off the edge means gone.
+    for (let k = this.leaves.length - 1; k >= 0; k--) {
+      const leaf = this.leaves[k];
+      leaf.x += leaf.vx * dt;
+      leaf.y += leaf.vy * dt;
+      leaf.rot += leaf.vr * dt;
+      const damp = Math.exp(-dt * 2.4);
+      leaf.vx *= damp;
+      leaf.vy *= damp;
+      leaf.vr *= damp;
+      if (leaf.x < -8 || leaf.y < -8 || leaf.x > this.w + 8 || leaf.y > this.h + 8) {
+        this.leaves.splice(k, 1);
+        if (Math.random() < 0.6) sfx.leaf();
+      }
+    }
+    if (!this.leavesDone && this.leaves.length === 0) {
+      this.leavesDone = true;
+      sfx.ding();
+      this.hooks.part?.('Leaves');
+    }
+
+    for (let k = this.particles.length - 1; k >= 0; k--) {
+      const p = this.particles[k];
+      p.life -= dt;
+      p.vy += p.g * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.drip) {
+        const i = (p.y | 0) * this.w + (p.x | 0);
+        if (p.y >= this.h || !this.part[i]) p.life = 0;
+        else {
+          this.wet[i] = Math.max(this.wet[i], 200);
+          this.mark('dirty', p.x | 0, p.y | 0, p.x | 0, p.y | 0);
+        }
+      }
+      if (p.life <= 0) this.particles.splice(k, 1);
+    }
+
+    // Wet spots dry and foam slowly pops.
+    this.dryTimer += dt;
+    if (this.dryTimer > 0.2 && this.active) {
+      const steps = Math.floor(this.dryTimer / 0.2);
+      this.dryTimer -= steps * 0.2;
+      const [x0, y0, x1, y1] = this.active;
+      let any = false;
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * this.w + x;
+          if (this.wet[i]) {
+            this.wet[i] = Math.max(0, this.wet[i] - 7 * steps);
+            any = true;
+          }
+          if (this.foam[i]) {
+            this.foam[i] = Math.max(0, this.foam[i] - 3 * steps);
+            any = true;
+          }
+        }
+      }
+      this.mark('dirty', x0, y0, x1, y1);
+      if (!any) this.active = null;
+    }
+
+    this.checkParts();
+
+    for (let k = this.flashes.length - 1; k >= 0; k--) {
+      this.flashes[k].t += dt;
+      if (this.flashes[k].t > 0.6) this.flashes.splice(k, 1);
+    }
+
+    if (this.dirty) {
+      const [x0, y0, x1, y1] = this.dirty;
+      this.compose(x0, y0, x1, y1);
+      this.dirty = null;
+    }
+    this.flush();
+  }
+
+  // A part counts as clean at 98%; the last specks are wiped for you.
+  checkParts() {
+    // At 98% overall, whatever specks are left wash away too.
+    const nearlyAll = this.progress() >= 0.98;
+    for (let p = 1; p < this.partLeft.length; p++) {
+      if (this.done[p] || (!nearlyAll && this.partLeft[p] > this.partTotal[p] * 0.02)) continue;
+      this.done[p] = 1;
+      this.partLeft[p] = 0;
+      const [x0, y0, x1, y1] = this.partBox[p];
+      const edge = [];
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * this.w + x;
+          if (this.part[i] !== p) continue;
+          for (const L of this.layers) L.amount[i] = 0;
+          if (this.part[i - 1] !== p || this.part[i + 1] !== p || this.part[i - this.w] !== p || this.part[i + this.w] !== p) edge.push(i);
+        }
+      }
+      this.compose(x0, y0, x1, y1);
+      this.flashes.push({ edge, t: 0 });
+      sfx.ding();
+      this.hooks.part?.(this.s.parts[p].name);
+    }
+    if (!this.finished && this.leavesDone && this.done.every((d) => d)) {
+      this.finished = true;
+      setLoop(null);
+      this.hooks.done?.();
+    }
+  }
+
+  toolOrigin() {
+    return [VIEW_W - 22, VIEW_H + 8];
+  }
+
+  render() {
+    const ctx = this.ctx;
+    const cam = Math.round(this.camX);
+    ctx.drawImage(this.sceneCanvas, cam, 0, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+
+    const top = this.s.view === 'top';
+    for (const leaf of this.leaves) {
+      const ca = Math.cos(leaf.rot);
+      const sa = Math.sin(leaf.rot);
+      if (top) {
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        for (const [u, v] of LEAF_SHAPE) ctx.fillRect(Math.round(leaf.x - cam + u * ca - v * sa) + 1, Math.round(leaf.y + u * sa + v * ca) + 1, 1, 1);
+      }
+      ctx.fillStyle = CSS(leaf.color);
+      for (const [u, v] of LEAF_SHAPE) ctx.fillRect(Math.round(leaf.x - cam + u * ca - v * sa), Math.round(leaf.y + u * sa + v * ca), 1, 1);
+      ctx.fillStyle = CSS(shade(leaf.color, 0.7));
+      ctx.fillRect(Math.round(leaf.x - cam), Math.round(leaf.y), 1, 1);
+    }
+
+    for (const p of this.particles) {
+      ctx.globalAlpha = p.fade ? Math.max(0, p.life / 0.6) : 1;
+      ctx.fillStyle = CSS(p.c);
+      ctx.fillRect(Math.round(p.x - cam), Math.round(p.y), p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+
+    for (const f of this.flashes) {
+      ctx.globalAlpha = Math.max(0, 1 - f.t / 0.6);
+      ctx.fillStyle = '#ffffff';
+      for (const i of f.edge) ctx.fillRect((i % this.w) - cam, (i / this.w) | 0, 1, 1);
+    }
+    ctx.globalAlpha = 1;
+
+    // Arrows hinting there's more of the job off screen.
+    if (this.maxCam > 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      const bob = Math.round(Math.sin(this.time * 4) * 2);
+      if (cam > 2) for (let k = 0; k < 5; k++) ctx.fillRect(6 + Math.abs(k - 2) + bob, 116 + k, 2, 1);
+      if (cam < this.maxCam - 2) for (let k = 0; k < 5; k++) ctx.fillRect(VIEW_W - 8 - Math.abs(k - 2) - bob, 116 + k, 2, 1);
+    }
+
+    this.drawTool();
+  }
+
+  drawTool() {
+    const ctx = this.ctx;
+    const ptr = this.pointer;
+    const [ax, ay] = this.toolOrigin();
+    const tx = ptr.down ? ptr.x : VIEW_W - 90;
+    const ty = ptr.down ? ptr.y : VIEW_H - 60;
+    const t = this.tool;
+    const line = (x0, y0, x1, y1, w, color) => {
+      ctx.fillStyle = color;
+      const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+      for (let k = 0; k <= n; k++) {
+        const x = x0 + ((x1 - x0) * k) / n;
+        const y = y0 + ((y1 - y0) * k) / n;
+        ctx.fillRect(Math.round(x - w / 2), Math.round(y - w / 2), w, w);
+      }
+    };
+    if (t === 'sponge') {
+      const bob = ptr.down ? Math.round(Math.sin(this.time * 30) * 1) : 0;
+      ctx.fillStyle = '#f2c94c';
+      ctx.fillRect(tx - 9 + bob, ty - 6, 18, 11);
+      ctx.fillStyle = '#3f9a52';
+      ctx.fillRect(tx - 9 + bob, ty + 3, 18, 3);
+      ctx.fillStyle = '#d9ad35';
+      for (const [x, y] of [[-5, -3], [2, -2], [5, -4], [-1, 0]]) ctx.fillRect(tx + x + bob, ty + y, 2, 2);
+      return;
+    }
+    const dx = tx - ax;
+    const dy = ty - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const reach = t === 'blower' ? 64 : 78;
+    const tipX = ax + ux * Math.min(reach, len - 6);
+    const tipY = ay + uy * Math.min(reach, len - 6);
+
+    if (ptr.down && (t === 'washer' || t === 'turbo' || t === 'soap')) {
+      // The jet: a jittery bright line from the nozzle to the spot.
+      const n = Math.ceil(Math.hypot(tx - tipX, ty - tipY));
+      const width = t === 'turbo' ? 1 : t === 'soap' ? 3 : 2;
+      for (let k = 0; k < n; k += 1) {
+        const f = k / n;
+        const jitter = (Math.random() - 0.5) * (t === 'soap' ? 3 : 1.2) * f;
+        const x = tipX + (tx - tipX) * f - uy * jitter;
+        const y = tipY + (ty - tipY) * f + ux * jitter;
+        if (t !== 'soap' && Math.random() < 0.12) continue;
+        ctx.fillStyle = t === 'soap' ? (k % 3 ? '#f6fafc' : '#d9e6ee') : k % 4 ? '#e9f7ff' : '#9fd7f0';
+        const s = width + (t === 'washer' && f > 0.7 ? 1 : 0);
+        ctx.fillRect(Math.round(x - s / 2), Math.round(y - s / 2), s, s);
+      }
+    }
+
+    if (t === 'blower') {
+      line(ax - ux * 6, ay - uy * 6, ax + ux * 22, ay + uy * 22, 14, '#e8742a');
+      line(ax + ux * 4, ay + uy * 4, ax + ux * 18, ay + uy * 18, 6, '#2a2a2e');
+      line(ax + ux * 20, ay + uy * 20, tipX, tipY, 6, '#3a3b40');
+      line(tipX - ux * 2, tipY - uy * 2, tipX, tipY, 7, '#55575d');
+      if (ptr.down) {
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        for (let k = 0; k < 6; k++) {
+          const f = (this.time * 3 + k / 6) % 1;
+          const sx = tipX + (tx - tipX) * f + (Math.random() - 0.5) * 10 * f;
+          const sy = tipY + (ty - tipY) * f + (Math.random() - 0.5) * 10 * f;
+          ctx.fillRect(Math.round(sx), Math.round(sy), 3, 1);
+        }
+      }
+      return;
+    }
+    // Pressure washer gun (or soap cannon): body, lance, coloured nozzle.
+    line(ax + ux * 14, ay + uy * 14, tipX, tipY, 3, '#9aa2ab');
+    line(ax + ux * 14, ay + uy * 14, tipX, tipY, 1, '#d5dbe1');
+    line(tipX - ux * 4, tipY - uy * 4, tipX, tipY, 5, t === 'turbo' ? '#1d1d22' : t === 'soap' ? '#3fa0e0' : '#d8323a');
+    line(ax - ux * 8, ay - uy * 8, ax + ux * 16, ay + uy * 16, 11, '#2a6fe8');
+    line(ax - ux * 6, ay - uy * 6, ax + ux * 14, ay + uy * 14, 3, '#5d95f0');
+    if (t === 'soap') line(ax + ux * 2 - uy * 8, ay + uy * 2 + ux * 8, ax + ux * 12 - uy * 8, ay + uy * 12 + ux * 8, 8, '#f4f4f0');
+    ctx.fillStyle = '#d99a6c';
+    ctx.fillRect(Math.round(ax - 5), Math.round(ay - 12), 10, 9);
+  }
+}

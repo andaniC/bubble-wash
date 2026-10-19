@@ -7,243 +7,325 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Splash Wash">
-  <meta name="theme-color" content="#4f8fd8">
+  <meta name="theme-color" content="#14181f">
   <title>Splash Wash</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --ink: #14283a;
-      --blue: #2a6fe8;
-      --panel: rgba(255, 255, 255, 0.82);
-    }
+    /* Everything is sized in game pixels: --u is one game pixel on screen. */
     html, body {
       margin: 0;
       height: 100%;
       overflow: hidden;
-      overscroll-behavior: none;
-      background: #cfe4f4;
-      font-family: 'Nunito', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
-      color: var(--ink);
+      background: #14181f;
+      color: #fff;
+      font-family: 'Pixelify Sans', ui-monospace, monospace;
       -webkit-user-select: none;
       user-select: none;
       -webkit-touch-callout: none;
       -webkit-tap-highlight-color: transparent;
     }
     body { position: fixed; inset: 0; }
-    #scene {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      display: block;
-      touch-action: none;
+    button { font: inherit; color: inherit; border: 0; cursor: pointer; touch-action: manipulation; }
+    canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+    .hidden { display: none !important; }
+
+    #stage {
+      --u: 3px;
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      overflow: hidden;
+      background: #000;
+      font-size: calc(var(--u) * 8);
     }
-    button {
-      font: inherit;
-      border: 0;
-      cursor: pointer;
-      touch-action: manipulation;
+    #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+    .chip {
+      background: rgba(18, 22, 30, 0.78);
+      border-radius: calc(var(--u) * 4);
+      box-shadow: inset 0 calc(var(--u) * -1) 0 rgba(0, 0, 0, 0.4);
     }
-    .panel {
-      background: var(--panel);
-      box-shadow: 0 2px 10px rgba(20, 40, 58, 0.15);
-      -webkit-backdrop-filter: blur(8px);
-      backdrop-filter: blur(8px);
-    }
+
     #mute {
-      position: fixed;
-      top: max(14px, env(safe-area-inset-top));
-      right: max(14px, env(safe-area-inset-right));
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      color: var(--ink);
+      position: absolute;
+      top: calc(var(--u) * 4);
+      right: calc(var(--u) * 4);
+      width: calc(var(--u) * 18);
+      height: calc(var(--u) * 18);
       display: grid;
       place-items: center;
+      z-index: 20;
+      padding: 0;
     }
-    #mute svg { width: 24px; height: 24px; }
+    #mute svg { width: calc(var(--u) * 11); height: calc(var(--u) * 11); }
     #mute .slash { display: none; }
     #mute.off .wave { display: none; }
     #mute.off .slash { display: inline; }
 
     #hud {
-      position: fixed;
-      top: max(14px, env(safe-area-inset-top));
-      left: max(14px, env(safe-area-inset-left));
-      right: calc(max(14px, env(safe-area-inset-right)) + 60px);
+      position: absolute;
+      top: calc(var(--u) * 4);
+      left: calc(var(--u) * 4);
+      right: calc(var(--u) * 26);
       display: flex;
+      gap: calc(var(--u) * 4);
       align-items: center;
-      gap: 10px;
-      opacity: 0;
-      transition: opacity 0.4s ease;
-      pointer-events: none;
+      z-index: 10;
     }
-    #hud.on { opacity: 1; }
-    #hud .panel {
-      height: 48px;
-      border-radius: 24px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 0 16px;
-      font-weight: 800;
-      font-size: 17px;
-      white-space: nowrap;
-    }
-    #job { flex: 1; min-width: 0; max-width: 460px; }
-    #item-label { overflow: hidden; text-overflow: ellipsis; }
-    #meter {
-      flex: 1;
-      min-width: 60px;
-      height: 12px;
-      border-radius: 6px;
-      background: rgba(20, 40, 58, 0.12);
-      overflow: hidden;
-    }
-    #meter-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #39b6ff, var(--blue));
-      transform-origin: left;
-      transform: scaleX(0);
-      transition: transform 0.15s linear;
-    }
-    #percent { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
-    #slots { display: flex; gap: 6px; }
-    #slots i {
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      box-shadow: inset 0 0 0 2px rgba(20, 40, 58, 0.25);
-      transition: background 0.3s, box-shadow 0.3s;
-    }
-    #slots i.filled { background: var(--blue); box-shadow: none; }
-
-    #card {
-      position: fixed;
-      left: 50%;
-      top: 42%;
-      transform: translate(-50%, -50%) scale(0.92);
-      padding: 22px 34px;
-      border-radius: 26px;
-      text-align: center;
-      opacity: 0;
-      transition: opacity 0.3s ease, transform 0.3s ease;
-      pointer-events: none;
-    }
-    #card.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-    #card b { display: block; font-size: 22px; font-weight: 800; opacity: 0.7; }
-    #card span { display: block; font-size: 40px; font-weight: 900; letter-spacing: -0.01em; }
-
-    #fade {
-      position: fixed;
-      inset: 0;
-      background: #f4f8fb;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    #title {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 18px;
-      padding: 24px 16px max(30px, env(safe-area-inset-bottom));
-      background: linear-gradient(to bottom, rgba(10, 24, 38, 0) 35%, rgba(10, 24, 38, 0.6) 100%);
-      transition: opacity 0.45s ease, visibility 0.45s;
-    }
-    #title.gone { opacity: 0; visibility: hidden; pointer-events: none; }
-    h1 {
-      margin: 0;
-      color: #fff;
-      font-size: clamp(44px, 9vw, 76px);
-      font-weight: 900;
-      letter-spacing: -0.02em;
-      line-height: 1;
-      text-shadow: 0 3px 18px rgba(10, 24, 38, 0.45);
-    }
-    #play {
-      width: 124px;
-      height: 124px;
-      border-radius: 50%;
-      background: var(--blue);
+    #home {
+      width: calc(var(--u) * 18);
+      height: calc(var(--u) * 18);
       display: grid;
       place-items: center;
-      box-shadow: 0 10px 26px rgba(10, 40, 100, 0.4);
-      transition: transform 0.15s ease;
-    }
-    #play:active { transform: scale(0.94); }
-    #play svg { width: 52px; height: 52px; margin-left: 8px; }
-    #levels {
-      display: flex;
-      gap: 10px;
-      max-width: min(100%, 640px);
-      overflow-x: auto;
-      padding: 6px 4px 8px;
-      scrollbar-width: none;
-      touch-action: pan-x;
-    }
-    #levels::-webkit-scrollbar { display: none; }
-    .chip {
+      padding: 0;
       flex: none;
-      width: 46px;
-      height: 46px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.85);
-      color: var(--ink);
-      font-weight: 800;
-      font-size: 17px;
     }
-    .chip.done { background: var(--blue); color: #fff; }
-    .chip.current { box-shadow: 0 0 0 3px #fff; }
+    #home i, #home i::before, #home i::after {
+      display: block;
+      width: calc(var(--u) * 9);
+      height: calc(var(--u) * 2);
+      background: #fff;
+      position: relative;
+    }
+    #home i::before, #home i::after { content: ''; position: absolute; left: 0; }
+    #home i::before { top: calc(var(--u) * -3); }
+    #home i::after { top: calc(var(--u) * 3); }
+    #job {
+      flex: 1;
+      min-width: 0;
+      height: calc(var(--u) * 18);
+      display: flex;
+      align-items: center;
+      gap: calc(var(--u) * 5);
+      padding: 0 calc(var(--u) * 6);
+    }
+    #job-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+    #bar {
+      flex: 1;
+      height: calc(var(--u) * 6);
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: calc(var(--u) * 3);
+      overflow: hidden;
+    }
+    #bar-fill { height: 100%; background: #5fd36a; transform-origin: left; transform: scaleX(0); transition: transform 0.12s linear; }
+    #pct { min-width: 2.6em; text-align: right; font-variant-numeric: tabular-nums; }
+
+    #tools {
+      position: absolute;
+      left: calc(var(--u) * 4);
+      bottom: calc(var(--u) * 4);
+      display: flex;
+      flex-direction: column;
+      gap: calc(var(--u) * 3);
+      z-index: 10;
+    }
+    .tool {
+      width: calc(var(--u) * 24);
+      height: calc(var(--u) * 24);
+      padding: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(18, 22, 30, 0.78);
+      border: calc(var(--u) * 1) solid rgba(255, 255, 255, 0.18);
+      border-radius: calc(var(--u) * 4);
+    }
+    .tool canvas { width: calc(var(--u) * 16); height: calc(var(--u) * 16); }
+    .tool.on { background: #f2c21b; border-color: #fff; }
+
+    #parts {
+      position: absolute;
+      right: calc(var(--u) * 4);
+      top: calc(var(--u) * 26);
+      padding: calc(var(--u) * 3) calc(var(--u) * 5);
+      font-size: calc(var(--u) * 7);
+      max-width: calc(var(--u) * 96);
+      z-index: 10;
+    }
+    #parts-head { padding: 0; background: none; font-weight: 600; }
+    #parts-head::after { content: ' ▾'; }
+    #parts.open #parts-head::after { content: ' ▴'; }
+    #parts-list { display: none; margin-top: calc(var(--u) * 2); line-height: 1.35; }
+    #parts.open #parts-list { display: block; }
+    #parts-list .ok { color: #7ee08a; }
+
+    #toast {
+      position: absolute;
+      left: 50%;
+      top: calc(var(--u) * 28);
+      transform: translateX(-50%);
+      padding: calc(var(--u) * 3) calc(var(--u) * 7);
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      z-index: 30;
+    }
+    #toast.on { opacity: 1; }
+
+    #hint {
+      position: absolute;
+      left: 50%;
+      bottom: calc(var(--u) * 16);
+      transform: translateX(-50%);
+      padding: calc(var(--u) * 4) calc(var(--u) * 8);
+      pointer-events: none;
+      z-index: 10;
+      animation: bob 1s ease-in-out infinite alternate;
+    }
+    @keyframes bob { to { transform: translate(-50%, calc(var(--u) * -3)); } }
+
+    #result {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(8, 12, 18, 0.55);
+      z-index: 40;
+    }
+    #result .box {
+      background: #1f2733;
+      border: calc(var(--u) * 2) solid #fff;
+      border-radius: calc(var(--u) * 6);
+      padding: calc(var(--u) * 10) calc(var(--u) * 16);
+      text-align: center;
+      min-width: calc(var(--u) * 150);
+    }
+    #result h2 { margin: 0; font-size: calc(var(--u) * 18); color: #f2c21b; }
+    #result p { margin: calc(var(--u) * 4) 0 0; }
+    #result-pay { font-size: calc(var(--u) * 16); color: #7ee08a; font-weight: 700; }
+    .btns { display: flex; gap: calc(var(--u) * 6); justify-content: center; margin-top: calc(var(--u) * 10); }
+    .btn {
+      background: #2a6fe8;
+      border-radius: calc(var(--u) * 4);
+      padding: calc(var(--u) * 4) calc(var(--u) * 10);
+      box-shadow: inset 0 calc(var(--u) * -2) 0 rgba(0, 0, 0, 0.3);
+      font-weight: 600;
+    }
+    .btn.alt { background: #3a4554; }
+
+    .page {
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      background: #1a3f86 linear-gradient(#2a6fe8, #13306a);
+      z-index: 15;
+    }
+    .page header {
+      display: flex;
+      align-items: center;
+      gap: calc(var(--u) * 6);
+      padding: calc(var(--u) * 6) calc(var(--u) * 26) calc(var(--u) * 4) calc(var(--u) * 8);
+    }
+    .page h1 {
+      margin: 0;
+      flex: 1;
+      font-size: calc(var(--u) * 18);
+      line-height: 1;
+      letter-spacing: calc(var(--u) * 0.5);
+      text-shadow: calc(var(--u) * 1) calc(var(--u) * 1) 0 #0d2047;
+    }
+    .money { padding: calc(var(--u) * 3) calc(var(--u) * 7); color: #f2c21b; font-weight: 700; }
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: calc(var(--u) * 5);
+      padding: calc(var(--u) * 2) calc(var(--u) * 8) calc(var(--u) * 10);
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      gap: calc(var(--u) * 1);
+      padding: calc(var(--u) * 3);
+      background: #10203f;
+      border-radius: calc(var(--u) * 5);
+      text-align: left;
+      box-shadow: inset 0 calc(var(--u) * -2) 0 rgba(0, 0, 0, 0.35);
+    }
+    .thumb { aspect-ratio: 4 / 3; border-radius: calc(var(--u) * 3); overflow: hidden; background: #0b1630; }
+    .thumb canvas { width: 100%; height: 100%; display: block; image-rendering: auto; }
+    .card b { font-size: calc(var(--u) * 7.5); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card span { font-size: calc(var(--u) * 6.5); color: #f2c21b; }
+    .card.done span { color: #7ee08a; }
+    .card.locked .thumb canvas { filter: grayscale(1) brightness(0.4); }
+    .card.locked b, .card.locked span { color: #8a93a3; }
+
+    #shop-list { display: flex; flex-direction: column; gap: calc(var(--u) * 4); padding: calc(var(--u) * 2) calc(var(--u) * 8) calc(var(--u) * 10); }
+    .item {
+      display: flex;
+      align-items: center;
+      gap: calc(var(--u) * 6);
+      padding: calc(var(--u) * 4) calc(var(--u) * 6);
+      background: #10203f;
+      border-radius: calc(var(--u) * 5);
+    }
+    .item .icon { width: calc(var(--u) * 24); height: calc(var(--u) * 24); flex: none; }
+    .item div { flex: 1; display: flex; flex-direction: column; gap: calc(var(--u) * 1); }
+    .item b { font-weight: 600; }
+    .item span { font-size: calc(var(--u) * 6.5); color: #b9c4d6; }
+    .buy { background: #3fa04a; border-radius: calc(var(--u) * 4); padding: calc(var(--u) * 3) calc(var(--u) * 7); font-weight: 700; min-width: calc(var(--u) * 40); }
+    .buy:disabled { background: #3a4554; color: #9aa6b8; cursor: default; }
+    #close-shop { padding: calc(var(--u) * 3) calc(var(--u) * 8); }
   </style>
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "./vendor/three.module.min.js",
-        "three/addons/": "./vendor/addons/"
-      }
-    }
-  </script>
   <script type="module" src="src/main.js"></script>
 </head>
 <body>
-  <canvas id="scene"></canvas>
+  <div id="stage">
+    <canvas id="view" width="320" height="240"></canvas>
 
-  <div id="hud">
-    <div class="panel"><span id="level-label">Level 1</span><span id="slots"><i></i><i></i><i></i></span></div>
-    <div class="panel" id="job">
-      <span id="item-label"></span>
-      <div id="meter"><div id="meter-fill"></div></div>
-      <span id="percent">0%</span>
+    <div id="hud" class="hidden">
+      <button id="home" class="chip" aria-label="Back to jobs"><i></i></button>
+      <div id="job" class="chip"><span id="job-name"></span><div id="bar"><div id="bar-fill"></div></div><span id="pct">0%</span></div>
     </div>
-  </div>
+    <div id="tools" class="hidden"></div>
+    <div id="parts" class="chip hidden"><button id="parts-head">Parts</button><div id="parts-list"></div></div>
+    <div id="hint" class="chip hidden">Hold your finger on the mud to blast it</div>
 
-  <button id="mute" class="panel" aria-label="Sound on or off">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none"/>
-      <path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>
-      <path class="slash" d="m16 9 6 6m0-6-6 6"/>
-    </svg>
-  </button>
+    <div id="board" class="page scroll">
+      <header>
+        <h1>SPLASH WASH</h1>
+        <span class="money chip">$0</span>
+        <button id="open-shop" class="btn">Shop</button>
+      </header>
+      <div id="grid"></div>
+    </div>
 
-  <div id="card" class="panel"><b>Level 1</b><span>All clean!</span></div>
+    <div id="shop" class="page scroll hidden">
+      <header>
+        <button id="close-shop" class="btn alt">◂ Jobs</button>
+        <h1>SHOP</h1>
+        <span class="money chip">$0</span>
+      </header>
+      <div id="shop-list"></div>
+    </div>
 
-  <div id="title">
-    <h1>Splash Wash</h1>
-    <button id="play" aria-label="Play">
-      <svg viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z" fill="#fff"/></svg>
+    <div id="result" class="hidden">
+      <div class="box">
+        <h2>JOB DONE!</h2>
+        <p id="result-name"></p>
+        <p id="result-pay"></p>
+        <p id="result-time"></p>
+        <div class="btns">
+          <button id="result-board" class="btn alt">Jobs</button>
+          <button id="result-next" class="btn">Next job ▸</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="chip"></div>
+
+    <button id="mute" class="chip" aria-label="Sound on or off">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square">
+        <path d="M11 5 6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none"/>
+        <path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>
+        <path class="slash" d="m16 9 6 6m0-6-6 6"/>
+      </svg>
     </button>
-    <div id="levels" aria-label="Pick a level"></div>
   </div>
-
-  <div id="fade"></div>
 </body>
 </html>
