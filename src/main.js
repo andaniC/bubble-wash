@@ -12,6 +12,8 @@ const SHOP = [
   { id: 'sponge', name: 'Sponge', price: 50, about: 'Scrub food and grime off plates and tables.' },
   { id: 'blower', name: 'Leaf Blower', price: 90, about: 'Blast leaves off driveways and decks. Blows dust and cobwebs away too.' },
   { id: 'turbo', name: 'Turbo Nozzle', price: 120, about: 'A tight, hard jet for gum, graffiti and barnacles.' },
+  { id: 'firehose', name: 'Fire Hose', price: 150, about: 'A massive wide blast. Shakes the screen and sends leaves flying.' },
+  { id: 'cannon', name: 'Hydro Cannon', price: 700, about: 'The biggest water gun there is. Cuts gum and graffiti, blows mud to bits.' },
   { id: 'soap', name: 'Soap Cannon', price: 200, about: 'Foam up oil and grease so they wash right off.' },
   { id: 'power2', name: 'Pump Upgrade I', price: 250, about: 'Washer hits 50% harder.' },
   { id: 'wide', name: 'Wide Fan Tip', price: 300, about: 'Wider spray from the washer.' },
@@ -103,6 +105,20 @@ function icon(tool) {
       r(10, 2, 2, 2, '#f2c21b');
       r(12, 4, 2, 2, '#f2c21b');
     }
+  } else if (tool === 'firehose') {
+    r(0, 10, 6, 4, '#a8221f');
+    r(3, 7, 7, 4, '#c8322e');
+    r(9, 6, 4, 5, '#d6a53a');
+    r(13, 5, 3, 7, '#b8862a');
+    r(12, 1, 2, 2, '#9fd7f0');
+    r(14, 13, 2, 2, '#9fd7f0');
+  } else if (tool === 'cannon') {
+    r(1, 6, 12, 6, '#3a3f48');
+    r(2, 7, 10, 1, '#5a616d');
+    r(4, 5, 2, 8, '#e8742a');
+    r(9, 5, 2, 8, '#e8742a');
+    r(12, 4, 4, 10, '#2a2d33');
+    r(5, 12, 4, 3, '#d99a6c');
   } else if (tool === 'blower') {
     r(1, 6, 7, 7, '#e8742a');
     r(2, 7, 5, 2, '#f39a55');
@@ -265,7 +281,7 @@ let lastWeak = -10;
 function toolBelt() {
   const belt = $('tools');
   belt.replaceChildren();
-  const tools = ['washer', 'turbo', 'soap', 'blower', 'sponge'].filter((t) => t === 'washer' || owns(t));
+  const tools = ['washer', 'turbo', 'firehose', 'cannon', 'soap', 'blower', 'sponge'].filter((t) => t === 'washer' || owns(t));
   for (const t of tools) {
     const b = document.createElement('button');
     b.className = `tool${play.tool === t ? ' on' : ''}`;
@@ -452,7 +468,7 @@ function step(dt) {
     const turbo = play.weak === 'gum' || play.weak === 'barnacles' || play.weak === 'paint';
     const need = turbo ? 'turbo' : 'soap';
     const name = DIRT[play.weak].name;
-    if (owns(need)) toast(turbo ? `${name}: try the turbo nozzle` : `${name}: foam it with soap first`);
+    if (owns(need) || (turbo && owns('cannon'))) toast(turbo ? `${name}: try the turbo nozzle or cannon` : `${name}: foam it with soap first`);
     else toast(`${name} is tough. Get the ${turbo ? 'Turbo Nozzle' : 'Soap Cannon'} in the shop`);
   }
   play.weak = null;

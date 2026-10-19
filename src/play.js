@@ -11,9 +11,21 @@ export const VIEW_H = 240;
 export const TOOLS = {
   washer: { name: 'Washer', loop: 'water' },
   turbo: { name: 'Turbo', loop: 'turbo' },
+  firehose: { name: 'Fire Hose', loop: 'fire' },
+  cannon: { name: 'Hydro Cannon', loop: 'cannon' },
   soap: { name: 'Soap', loop: 'soap' },
   blower: { name: 'Blower', loop: 'blower' },
   sponge: { name: 'Sponge', loop: null },
+};
+
+// The water tools: spray radius, how hard they hit, which mess they cut
+// (the cannon cuts like the turbo), how much they shake the screen and how
+// hard they fling leaves about.
+const NOZZLES = {
+  washer: { r: 8, power: 1, grip: 'washer', mist: 3, chips: 1 },
+  turbo: { r: 3.4, power: 3, grip: 'turbo', mist: 3, chips: 1 },
+  firehose: { r: 15, power: 2, grip: 'washer', mist: 10, chips: 2.5, shake: 1.4, push: 420 },
+  cannon: { r: 10, power: 4.5, grip: 'turbo', mist: 14, chips: 5, shake: 2.8, push: 900 },
 };
 
 const LEAF_COLORS = ['#c8642a', '#d9902e', '#b0461f', '#e0b23a', '#8a5a2a', '#9a8a2a'].map(col);
@@ -125,6 +137,9 @@ export class Play {
     this.finished = false;
     this.lastSound = 0;
     this.weak = null; // a kind of mess the current tool can barely shift
+    this.chipRate = 1;
+    this.shake = 0;
+    this.kick = 0;
   }
 
   // ---------- bookkeeping ----------
@@ -224,7 +239,7 @@ export class Play {
           const na = a - take <= this.thr[i] ? 0 : Math.floor(a - take); // looks clean = is clean
           L.amount[i] = na;
           this.partLeft[p] -= a - na;
-          if (Math.random() < 0.012) this.chip(x, y, L.color[i]);
+          if (Math.random() < 0.012 * this.chipRate) this.chip(x, y, L.color[i]);
           if (this.s.view === 'side' && Math.random() < 0.004) this.drip(x, y, L.color[i]);
           break;
         }
@@ -371,11 +386,11 @@ export class Play {
     this.add({ x, y, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 40 - 10, g: 0, life: 0.6, c, size: 2, fade: true });
   }
 
-  mist(x, y) {
+  mist(x, y, count = 3, speed = 1) {
     const side = this.s.view === 'side';
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < count; k++) {
       const a = side ? -Math.PI / 2 + (Math.random() - 0.5) * 2.4 : Math.random() * Math.PI * 2;
-      const v = 40 + Math.random() * 90;
+      const v = (40 + Math.random() * 90) * speed;
       this.add({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: side ? 300 : 0, life: 0.25 + Math.random() * 0.2, c: col(Math.random() < 0.5 ? '#ffffff' : '#bfe3f2'), size: 1 });
     }
   }
@@ -400,12 +415,18 @@ export class Play {
       this.camX = Math.max(0, Math.min(this.maxCam, this.camX));
 
       const t = this.tool;
-      if (t === 'washer' || t === 'turbo') {
-        const r = t === 'turbo' ? 3.4 : 8 * (1 + this.wide * 0.3);
-        const strength = (t === 'turbo' ? 3 : 1) * this.power;
-        this.spray(tx, ty, r, strength * dt, t);
-        this.mist(tx, ty);
-        loop = t === 'turbo' ? 'turbo' : 'water';
+      const nz = NOZZLES[t];
+      if (nz) {
+        const r = nz.r * (t === 'washer' ? 1 + this.wide * 0.3 : 1);
+        this.chipRate = nz.chips;
+        this.spray(tx, ty, r, nz.power * this.power * dt, nz.grip);
+        this.mist(tx, ty, nz.mist, nz.shake ? 1.6 : 1);
+        if (nz.push) this.nudgeLeaves(tx, ty, r + 24, nz.push);
+        if (nz.shake) {
+          this.shake = Math.max(this.shake, nz.shake);
+          this.kick = Math.min(1, this.kick + dt * 6);
+        }
+        loop = TOOLS[t].loop;
       } else if (t === 'soap') {
         this.soap(tx, ty, dt);
         loop = 'soap';
@@ -420,6 +441,10 @@ export class Play {
     }
     ptr.moved = 0;
     setLoop(loop);
+    if (!ptr.down || !NOZZLES[this.tool]?.shake) {
+      this.shake *= Math.exp(-dt * 12);
+      this.kick *= Math.exp(-dt * 10);
+    }
 
     // Leaves drift and slide to a stop; off the edge means gone.
     for (let k = this.leaves.length - 1; k >= 0; k--) {
@@ -535,7 +560,12 @@ export class Play {
   render() {
     const ctx = this.ctx;
     const cam = Math.round(this.camX);
-    ctx.drawImage(this.sceneCanvas, cam, 0, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    // Big hoses rattle the whole view.
+    const sx = this.shake > 0.2 ? Math.round((Math.random() - 0.5) * this.shake * 2) : 0;
+    const sy = this.shake > 0.2 ? Math.round((Math.random() - 0.5) * this.shake * 2) : 0;
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.drawImage(this.sceneCanvas, cam - 4, 0, VIEW_W + 8, VIEW_H, -4, 0, VIEW_W + 8, VIEW_H);
 
     const top = this.s.view === 'top';
     for (const leaf of this.leaves) {
@@ -574,6 +604,7 @@ export class Play {
     }
 
     this.drawTool();
+    ctx.restore();
   }
 
   drawTool() {
@@ -611,20 +642,58 @@ export class Play {
     const tipX = ax + ux * Math.min(reach, len - 6);
     const tipY = ay + uy * Math.min(reach, len - 6);
 
-    if (ptr.down && (t === 'washer' || t === 'turbo' || t === 'soap')) {
+    const big = t === 'firehose' || t === 'cannon';
+    if (ptr.down && (t === 'washer' || t === 'turbo' || t === 'soap' || big)) {
       // The jet: a jittery bright line from the nozzle to the spot.
       const n = Math.ceil(Math.hypot(tx - tipX, ty - tipY));
-      const width = t === 'turbo' ? 1 : t === 'soap' ? 3 : 2;
+      const width = t === 'turbo' ? 1 : t === 'soap' ? 3 : t === 'firehose' ? 5 : t === 'cannon' ? 7 : 2;
       for (let k = 0; k < n; k += 1) {
         const f = k / n;
-        const jitter = (Math.random() - 0.5) * (t === 'soap' ? 3 : 1.2) * f;
+        const jitter = (Math.random() - 0.5) * (t === 'soap' ? 3 : big ? 4 : 1.2) * f;
         const x = tipX + (tx - tipX) * f - uy * jitter;
         const y = tipY + (ty - tipY) * f + ux * jitter;
         if (t !== 'soap' && Math.random() < 0.12) continue;
         ctx.fillStyle = t === 'soap' ? (k % 3 ? '#f6fafc' : '#d9e6ee') : k % 4 ? '#e9f7ff' : '#9fd7f0';
-        const s = width + (t === 'washer' && f > 0.7 ? 1 : 0);
+        const s = width + ((t === 'washer' || big) && f > 0.7 ? (big ? 3 : 1) : 0);
         ctx.fillRect(Math.round(x - s / 2), Math.round(y - s / 2), s, s);
       }
+      if (big) {
+        // A bright core down the middle and a burst where it lands.
+        ctx.fillStyle = '#ffffff';
+        for (let k = 0; k < n; k += 2) {
+          const f = k / n;
+          ctx.fillRect(Math.round(tipX + (tx - tipX) * f), Math.round(tipY + (ty - tipY) * f), 2, 2);
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        const rr = (t === 'cannon' ? 12 : 16) + Math.random() * 4;
+        for (let a = 0; a < Math.PI * 2; a += 0.35) ctx.fillRect(Math.round(tx + Math.cos(a) * rr), Math.round(ty + Math.sin(a) * rr * 0.7), 2, 2);
+      }
+    }
+
+    if (big) {
+      // Pulled back a little by the force of the water.
+      const back = this.kick * 5 + (ptr.down ? Math.random() * 2 : 0);
+      const bx = tipX - ux * back;
+      const by = tipY - uy * back;
+      if (t === 'firehose') {
+        line(ax + 18, ay + 18, ax + ux * 10, ay + uy * 10, 9, '#a8221f');
+        line(ax + ux * 10, ay + uy * 10, bx - ux * 10, by - uy * 10, 8, '#c8322e');
+        line(ax + ux * 10, ay + uy * 10, bx - ux * 10, by - uy * 10, 2, '#e8605a');
+        line(bx - ux * 14, by - uy * 14, bx, by, 9, '#d6a53a');
+        line(bx - ux * 4, by - uy * 4, bx, by, 11, '#b8862a');
+      } else {
+        line(ax - ux * 6, ay - uy * 6, bx, by, 15, '#3a3f48');
+        line(ax - ux * 4, ay - uy * 4, bx - ux * 2, by - uy * 2, 4, '#5a616d');
+        for (const f of [0.25, 0.55, 0.85]) {
+          const cx = ax + (bx - ax) * f;
+          const cy = ay + (by - ay) * f;
+          line(cx - ux * 2, cy - uy * 2, cx + ux * 2, cy + uy * 2, 17, '#e8742a');
+        }
+        line(bx - ux * 5, by - uy * 5, bx, by, 19, '#2a2d33');
+      }
+      ctx.fillStyle = '#d99a6c';
+      ctx.fillRect(Math.round(ax - 6), Math.round(ay - 14), 12, 10);
+      return;
     }
 
     if (t === 'blower') {

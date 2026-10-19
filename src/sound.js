@@ -65,6 +65,13 @@ export function unlock() {
     loops.blower = noiseLoop([['bandpass', 600, 0.6]], 0.3);
     motor(96, 400, 0.35, loops.blower.gain);
     loops.blower.gain.connect(master);
+    // Fire hose: a big throaty gush. Hydro cannon: a roar with a deep engine.
+    loops.fire = noiseLoop([['highpass', 300], ['lowpass', 3800]], 0.34);
+    motor(40, 180, 0.6, loops.fire.gain);
+    loops.fire.gain.connect(master);
+    loops.cannon = noiseLoop([['lowpass', 2600]], 0.42);
+    motor(30, 160, 0.9, loops.cannon.gain);
+    loops.cannon.gain.connect(master);
     // Soap cannon: a softer, wetter hiss.
     loops.soap = noiseLoop([['bandpass', 2500, 0.8]], 0.14);
     loops.soap.gain.connect(master);
@@ -72,7 +79,7 @@ export function unlock() {
   if (ctx.state === 'suspended') ctx.resume();
 }
 
-// Which looping sound is running: 'water', 'turbo', 'blower', 'soap' or null.
+// Which looping sound is running: 'water', 'turbo', 'fire', 'cannon', 'blower', 'soap' or null.
 export function setLoop(name) {
   if (!ctx) return;
   for (const [key, loop] of Object.entries(loops)) {
