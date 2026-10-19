@@ -8,10 +8,10 @@ import { unlock, sfx, say, setWater, setMuted, isMuted } from './sound.js';
 
 // Each level brings three dirty things into the yard, one at a time. Touch
 // and hold to spray: the mess comes off wherever the jet hits. Swipe beside
-// the object to walk around it. At 95% clean the rest melts away and the
+// the object to walk around it. At 93% clean the rest melts away and the
 // next one arrives.
 
-const CLEAN_AT = 0.95;
+const CLEAN_AT = 0.93;
 const SAVE_KEY = 'splash-wash-progress';
 const search = new URLSearchParams(location.search);
 const debug = search.has('debug');
@@ -67,6 +67,8 @@ let clockTime = 0;
 let started = false;
 let shownTime = null;
 let fadeLevel = 0;
+let best = 0;
+let bestAt = 0;
 
 const rig = { angle: 0.55, dist: 4, height: 1.6, lookY: 0.8, spin: 0 };
 const rigGoal = { dist: 4, height: 1.6, lookY: 0.8 };
@@ -83,8 +85,9 @@ function prepare(spec) {
 function aimRigAt(o, snap) {
   const portrait = Math.max(1, 1.15 / camera.aspect);
   rigGoal.dist = (o.size * 1.05 + 0.9) * portrait;
-  rigGoal.height = o.height * 0.55 + 0.45 + o.size * 0.12;
-  rigGoal.lookY = o.height * 0.42;
+  // Stand a little above things and look down on them, so tops get washed too.
+  rigGoal.height = o.height * 0.9 + o.size * 0.35 + 0.3;
+  rigGoal.lookY = o.height * 0.4;
   if (snap) Object.assign(rig, rigGoal);
 }
 
@@ -235,7 +238,7 @@ function spray(dt) {
     const h = hitTest(p);
     if (!h) continue;
     primary ||= h;
-    wash(obj, h.point, obj.size * 0.17, dt * 3.5);
+    wash(obj, h.point, obj.size * 0.22, dt * 6);
   }
   return primary;
 }
@@ -251,7 +254,14 @@ function update(dt) {
 
   if (phase === 'wash' && obj) {
     jet = spray(dt);
-    if (cleanFraction(obj) >= CLEAN_AT) setPhase('done');
+    // Done when nearly clean, or when mostly clean and the last bits are
+    // somewhere hard to reach (nothing has come off for a few seconds).
+    const clean = cleanFraction(obj);
+    if (phaseTime < dt || clean > best + 0.003) {
+      best = clean;
+      bestAt = phaseTime;
+    }
+    if (clean >= CLEAN_AT || (clean >= 0.85 && phaseTime - bestAt > 5)) setPhase('done');
   } else if (phase === 'done') {
     fadeDirt(obj, Math.exp(-dt * 5));
     rig.angle += dt * 0.5;
@@ -291,10 +301,13 @@ function update(dt) {
   updateMeter();
 }
 
+const skipRender = debug && search.has('norender');
+
 function frame(dt) {
   clockTime += dt;
   update(dt);
-  renderer.render(scene, camera);
+  if (skipRender) scene.updateMatrixWorld();
+  else renderer.render(scene, camera);
 }
 
 // ---------- layout ----------
@@ -383,6 +396,7 @@ if (debug) {
     get level() { return levelNum; },
     get ready() { return !!obj; },
     get clean() { return obj ? cleanFraction(obj) : 0; },
+    get obj() { return obj; },
     step: frame,
     goToLevel,
     // Show one object right away, for checking how things look.

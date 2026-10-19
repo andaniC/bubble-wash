@@ -66,7 +66,7 @@ export async function makeWashable([kind, variant], level, dirtKey) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     inner.add(mesh);
-    parts.push({ mesh, positions: p.positions, dirt, attr, clean: p.clean });
+    parts.push({ mesh, positions: p.positions, normals: p.normals, dirt, attr, clean: p.clean });
   }
 
   const hg = new THREE.BufferGeometry();
@@ -95,7 +95,8 @@ export async function makeWashable([kind, variant], level, dirtKey) {
 }
 
 // A coat of mess: thicker low down and in blotches, a bit thinner in places
-// so the shape still reads.
+// so the shape still reads. Surfaces facing the ground stay clean: the jet
+// can never reach them from where you stand.
 function soil(obj, model, level) {
   const h = model.max[1] - model.min[1];
   const seed = Math.random() * 100;
@@ -104,6 +105,10 @@ function soil(obj, model, level) {
     if (p.clean) continue;
     const pos = p.positions;
     for (let i = 0; i < p.dirt.length; i++) {
+      if (p.normals[i * 3 + 1] < -0.45) {
+        p.dirt[i] = 0;
+        continue;
+      }
       const x = pos[i * 3];
       const y = pos[i * 3 + 1];
       const z = pos[i * 3 + 2];
